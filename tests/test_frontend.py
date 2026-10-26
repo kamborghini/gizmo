@@ -16167,6 +16167,32 @@ def t_moving_in_is_the_owners():
     ok("if (!teamMe || teamMe.role === 'master')" in row and "if (!stockLive())" in row, "drawn for the owner alone, the move only before it")
     ok("Moved in on" in fn_src("function stockMoveRowWords("), "after the move, when")
 
+
+@test
+def t_a_stock_move_still_finishing_is_said():
+    """Review, 26 Oct 2026: a move that went live but has steps left (the
+    Stock tab, the waiting bookings, the first backup) showed the green
+    "Moved in" line, and a failing step was never seen. The window says what
+    is left, in the server's words when a step failed, until it is done."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = "const fmtDate = () => '26 Oct', londonHM = () => '18:00';\n" + fn_src("function stockMoveRowWords(") + "\n" \
+        + fn_src("function stockMoveSays(") + r"""
+const moved = { at: '2026-10-26T18:00:00+00:00', by_name: 'Cameron' };
+const said = (run, live) => stockMoveSays({ live: live !== false, moved_in: moved, run: run });
+console.log(JSON.stringify({
+  failing: said({ kind: 'move', state: 'finishing', words: 'Moved in, but the first stock backup did not finish.' }),
+  finishing: said({ kind: 'move', state: 'finishing' }),
+  done: said({ kind: 'move', state: 'done' }),
+  running: said({ kind: 'check', state: 'running' }, false) }));"""
+    got = _run_node(js)
+    eq(got["failing"], ["bad", "Moved in, but the first stock backup did not finish."])
+    eq(got["finishing"][0], "wait")
+    ok("Stock tab" in got["finishing"][1], got["finishing"])
+    eq(got["done"], ["good", "Moved in on 26 Oct, 18:00 by Cameron. The stock app can stay switched off."])
+    eq(got["running"][0], "wait")
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

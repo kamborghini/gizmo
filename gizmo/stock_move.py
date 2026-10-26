@@ -11,12 +11,23 @@ folder for its whole process (stock_store.rooted), which must never happen
 inside the running server. A check or a move runs on a worker thread with its
 state on disk, so a page that closes can come back to it, and a run left
 running by a process that has gone (a restart) says it was interrupted.
+
+Once the converter has installed what it proved, the worker puts the stock
+sheet live and stops. The last steps (the Stock tab for the people matched,
+the bookings that waited, the first stock backup, the history line) are
+finished by the next look at where the move stands (status), on a request,
+one step at a time and each recorded, so a restart or a failing step in
+between is finished later rather than lost. The export and every converted
+copy are real data: none is kept once its run is over, and the export goes
+once the move is done; whatever was at the live paths before is kept, set
+aside.
 """
 import hashlib
 import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -35,6 +46,11 @@ NAMES_SECONDS = 10 * 60            # reading the names out of a large export
 
 _worker = None                     # the thread running a check or a move, in this process
 _starting = threading.Lock()       # one start at a time
+_finishing = threading.Lock()      # one finish of a move at a time
+# The last steps of a move, in order, and how the window names one that failed.
+STEPS = ("tabs", "queue", "backup", "history")
+STEP_WORDS = {"tabs": "opening the Stock tab for the people matched", "queue": "booking the made orders that waited",
+              "backup": "the first stock backup", "history": "the history line"}
 
 
 def move_dir() -> str:
@@ -86,9 +102,14 @@ def _not_live() -> None:
         raise stock.Refused(409, "The stock sheet has already moved in.")
 
 
+def _alive() -> bool:
+    return _worker is not None and _worker.is_alive()
+
+
 def _running() -> bool:
+    alive = _alive()          # asked before the run is read: a run finishing in between is never taken for running
     run = _read("run.json")
-    return bool(run and run.get("state") == "running" and _worker is not None and _worker.is_alive())
+    return bool(alive and run and run.get("state") == "running")
 
 
 def _tool(args: list, timeout: int) -> tuple:
@@ -111,6 +132,28 @@ def _forget_upload() -> None:
             os.remove(_path(name))
         except FileNotFoundError:
             pass
+
+
+def _clear_run(folder: str):
+    """Remove a run's folder (its converted copy is real data), first moving
+    up anything the install set aside, which is kept. The folder it went to, or None."""
+    kept = None
+    stores = os.path.join(folder, "stores")
+    if os.path.isdir(stores):
+        for name in sorted(os.listdir(stores)):
+            if name.startswith("set-aside-") and os.listdir(os.path.join(stores, name)):
+                kept = _path(name)
+                shutil.move(os.path.join(stores, name), kept)
+    shutil.rmtree(folder, ignore_errors=True)
+    return kept
+
+
+def _clear_runs() -> None:
+    """Any run folder left behind (a restart mid-run)."""
+    if os.path.isdir(move_dir()):
+        for name in os.listdir(move_dir()):
+            if name.startswith("run-"):
+                _clear_run(_path(name))
 
 
 def _exported_at() -> str:
@@ -207,6 +250,7 @@ def start(uid: str, kind: str, people) -> dict:
                     and last.get("sha256") == meta.get("sha256") and last.get("people") == people):
                 raise stock.Refused(409, "Check this export first: a move needs a passing check of the same export, "
                                          "matched to the same people.")
+        _clear_runs()
         run = {"kind": kind, "state": "running", "at": _now(), "by": uid, "sha256": meta.get("sha256"), "people": people}
         _write_run(run)
         _worker = threading.Thread(target=_execute, args=(run,), name="stock-move", daemon=True)
@@ -223,7 +267,7 @@ def _execute(run: dict) -> None:
         _private(people, json.dumps(run["people"]))
         args = ["--export", _path("export.json"), "--people", people, "--out", os.path.join(folder, "stores"),
                 "--json-report", report] + (["--install"] if run["kind"] == "move" else [])
-        code, _out, err = _tool(args, RUN_SECONDS)
+        code, out, err = _tool(args, RUN_SECONDS)
         try:
             with open(report, encoding="utf-8") as fh:
                 got = json.load(fh)
@@ -234,15 +278,24 @@ def _execute(run: dict) -> None:
         if code == 0 and run["kind"] == "check":
             run["state"] = "passed"
         elif code == 0:
+            try:
+                installed = json.loads((out or "").strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                installed = {}
+            run["set_aside"] = _clear_run(folder) if installed.get("set_aside") else None
             _go_live(run)
-            run["state"] = "done"
-        elif code == 1:
+            run["state"] = "finishing"
+        elif code == 1 and got.get("proven") is False and found:
             run.update(state="failed", words=f"{len(found)} difference{'' if len(found) == 1 else 's'} between the "
                                              "export and what Reactor would hold, so nothing was moved.")
+        elif code in (2, 3):
+            run.update(state="refused", words=_said(err) or "The converter refused it without saying why.")
         else:
-            run.update(state="refused", words=_said(err) or "The converter stopped without saying why. The server's log has it.")
-            if code != 2 and code != 3:
-                logger.error("stock move: the converter stopped (%s): %s", code, (err or "")[-2000:])
+            # A crash on something the converter did not expect: never read as differences.
+            logger.error("stock move: the converter stopped (%s): %s", code, (err or "")[-4000:])
+            why = _said(err)
+            run.update(state="stopped", words="Nothing was moved: the converter stopped"
+                       + (" (" + why.rstrip(".") + ")" if why else "") + ". The server's log has the detail.")
     except subprocess.TimeoutExpired:
         run.update(state="failed", words="It took longer than 30 minutes, so it was stopped and nothing was moved.")
     except Exception as e:
@@ -251,55 +304,95 @@ def _execute(run: dict) -> None:
     finally:
         run["finished_at"] = _now()
         _write_run(run)
+        if os.path.isdir(folder):
+            _clear_run(folder)
 
 
 def _go_live(run: dict) -> None:
     """After the converter has installed what it proved: the moment of going
-    live (last of the stores), the Stock tab for each person matched, the
-    bookings that never reached the stock app tried again here, the first
-    stock backup and the history line."""
-    from gizmo import activity, stock_backups, stock_link
-    uid = run["by"]
+    live, last of the stores. The remaining steps are _finish's."""
     with stock._lock:
         stock.forget_memory()
         settings = stock_store.load_settings()
         at = stock.now_iso()
         settings["live_since"] = at
-        settings["moved_in"] = {"at": at, "by": uid, "sha256": run["sha256"], "people": run["people"],
-                                "counts": run.get("counts")}
+        settings["moved_in"] = {"at": at, "by": run["by"], "sha256": run["sha256"], "people": run["people"],
+                                "counts": run.get("counts"), "set_aside": run.get("set_aside"), "done": []}
         stock_store.write_settings(settings)
-    d = team._load_users()
-    granted = []
-    for acct in sorted(set(run["people"].values())):
-        u = d["users"].get(acct)
-        if not u or u.get("deleted") or u.get("role") == "master":
-            continue
-        tabs = list(u["tabs"]) if isinstance(u.get("tabs"), list) else list(team.DEFAULT_TABS)
-        if "stock" not in tabs:
-            u["tabs"] = tabs + ["stock"]
-            granted.append(acct)
-    if granted:
-        team._write_users(d)
-        for acct in granted:
-            activity._track(uid, "team", "changed tab access",
-                            f"{team._team_name(acct)} can open the Stock tab (the stock sheet moved in)")
-    pending = stock_link._load_zeta_pending()
-    for entry in pending.values():
-        entry["tries"] = 0
-        entry.pop("stuck", None)
-    if pending:
-        stock_link._write_zeta_pending(pending)
-    who = stock.actor(uid)
-    try:
+
+
+def _step(name: str, moved: dict) -> None:
+    from gizmo import activity, stock_backups, stock_link
+    uid, who = moved["by"], stock.actor(moved["by"])
+    if name == "tabs":
+        d = team._load_users()
+        granted = []
+        for acct in sorted(set((moved.get("people") or {}).values())):
+            u = d["users"].get(acct)
+            if not u or u.get("deleted") or u.get("role") == "master":
+                continue
+            tabs = list(u["tabs"]) if isinstance(u.get("tabs"), list) else list(team.DEFAULT_TABS)
+            if "stock" not in tabs:
+                u["tabs"] = tabs + ["stock"]
+                granted.append(acct)
+        if granted:
+            team._write_users(d)
+            for acct in granted:
+                activity._track(uid, "team", "changed tab access",
+                                f"{team._team_name(acct)} can open the Stock tab (the stock sheet moved in)")
+    elif name == "queue":
+        # Bookings that never reached the stock app are tried again, here now
+        # (a booking applied twice changes nothing), parked ones included.
+        pending = {k: dict(v) for k, v in stock_link._load_zeta_pending().items()}
+        for entry in pending.values():
+            entry["tries"] = 0
+            entry.pop("stuck", None)
+        if pending:
+            stock_link._write_zeta_pending(pending)
+    elif name == "backup":
         stock_backups.make_backup(who)
-    except Exception:
-        logger.exception("stock move: the first stock backup was not made")
-    counts = run.get("counts") or {}
-    with stock._lock:
-        st = stock.state()
-        stock.commit(st, changed=set(), history=[stock.history_row(
-            who, "moved_in", detail=f"moved in from the stock app: {counts.get('items', 0)} lines, "
-                                    f"{counts.get('history', 0)} history entries")])
+    elif name == "history":
+        counts = moved.get("counts") or {}
+        with stock._lock:
+            st = stock.state()
+            stock.commit(st, changed=set(), history=[stock.history_row(
+                who, "moved_in", detail=f"moved in from the stock app: {counts.get('items', 0)} lines, "
+                                        f"{counts.get('history', 0)} history entries")])
+
+
+def _finish(run) -> None:
+    """The last steps of a move that has gone live, each recorded as it is
+    done, so a restart or a failing step is finished by a later look. Then
+    the export goes."""
+    if not _finishing.acquire(blocking=False):
+        return
+    try:
+        for name in STEPS:
+            with stock._lock:
+                settings = stock_store.load_settings()
+                moved = settings.get("moved_in") or {}
+            if name in (moved.get("done") or []):
+                continue
+            try:
+                _step(name, moved)
+            except Exception:
+                logger.exception("stock move: %s did not finish", name)
+                if run:
+                    run.update(state="finishing", words=f"Moved in, but {STEP_WORDS[name]} did not finish. It is tried "
+                                                        "again each time this window or Settings is opened.")
+                    _write_run(run)
+                return
+            with stock._lock:
+                settings = stock_store.load_settings()
+                settings["moved_in"]["done"] = list(settings["moved_in"].get("done") or []) + [name]
+                stock_store.write_settings(settings)
+        _forget_upload()
+        if run:
+            run.update(state="done", finished_at=_now())
+            run.pop("words", None)
+            _write_run(run)
+    finally:
+        _finishing.release()
 
 
 # ---- where it stands -------------------------------------------------------------------
@@ -310,10 +403,15 @@ def status(uid: str) -> dict:
     bookings queued for the stock app."""
     from gizmo import stock_link
     _owner(uid)
+    alive = _alive()          # before the run is read: one finishing in between is never stamped interrupted
     run = _read("run.json")
-    if run and run.get("state") == "running" and not (_worker is not None and _worker.is_alive()):
+    if run and run.get("state") == "running" and not alive:
         run.update(state="interrupted", words="Reactor restarted while this was running, so it did not finish. Run it again.")
         _write_run(run)
+    moved = stock_store.load_settings().get("moved_in")
+    if isinstance(moved, dict) and set(STEPS) - set(moved.get("done") or []) and not alive:
+        _finish(run if run and run.get("kind") == "move" else None)
+        run = _read("run.json")
     meta = _read("upload.json")
     done = bool(meta and meta.get("done"))
     settings = stock_store.load_settings()

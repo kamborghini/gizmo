@@ -181,7 +181,12 @@ def main(argv=None) -> int:
             print("the export failed:\n" + r.stdout + r.stderr)
             return 1
         with open(export, encoding="utf-8") as fh:
-            unknown = json.load(fh).get("unknown_tables")
+            got = json.load(fh)
+        unknown = got.get("unknown_tables")
+        if url.startswith(("postgres://", "postgresql")) and got.get("source_session") != {"isolation": "repeatable read",
+                                                                                          "read_only": "on"}:
+            print(f"the export was not read in one read-only snapshot: {got.get('source_session')!r}")
+            return 1
         if unknown != {"extra_notes": 0}:
             print(f"the export did not record the table it does not know: {unknown!r}")
             return 1

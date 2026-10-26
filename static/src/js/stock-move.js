@@ -49,6 +49,30 @@
             return 'Still kept in the stock app. Move it in when you are both ready: Reactor checks the export first and '
                 + 'changes nothing until every figure is proven.';
         }
+        /* The counts a check proved, as words. */
+        function stockMoveCounts(c) {
+            return c ? [['lines', c.items], ['history entries', c.history], ['snapshots', c.snapshots], ['quarters', c.quarters],
+                ['warnings', c.warnings], ['suppliers', c.suppliers], ['orders', c.orders]]
+                .filter(x => x[1] != null).map(x => Number(x[1]).toLocaleString('en-GB') + ' ' + x[0]).join(', ') : '';
+        }
+        /* What the window says of where things stand, and in what tone (good,
+           bad, wait or plain). A move that has gone live but has steps left is
+           said as such, in the server's words when a step failed, until done. */
+        function stockMoveSays(st) {
+            const run = st && st.run;
+            if (run && run.kind === 'move' && run.state === 'finishing') {
+                return run.words ? ['bad', run.words]
+                    : ['wait', 'Moved in. Opening the Stock tab for the people matched, booking the orders that waited and making the first backup.'];
+            }
+            if (st && st.live) return ['good', stockMoveRowWords(st)];
+            if (!run) return ['plain', 'Check the export once the names are matched. Nothing changes until you move it in.'];
+            if (run.state === 'running') {
+                return ['wait', run.kind === 'move' ? 'Moving in. This can take a few minutes: the window can be closed and opened again.'
+                    : 'Checking every line, history entry and figure. This can take a few minutes.'];
+            }
+            if (run.state === 'passed') return ['good', 'Proven: ' + stockMoveCounts(run.counts) + ' match the stock app’s export exactly.'];
+            return ['bad', run.words || 'That did not finish.'];
+        }
         const STOCK_MOVE_PART = 1000000;   // characters: at most 3 MB of text, well under the server's 4 MB a part
         async function openStockMove(opener) {
             let st = null, people = {}, poll = null, closed = false, wasRunning = false;
@@ -95,34 +119,25 @@
                     peopleHost.append(row);
                 });
             };
-            const counts = (c) => c ? [['lines', c.items], ['history entries', c.history], ['snapshots', c.snapshots],
-                ['quarters', c.quarters], ['warnings', c.warnings], ['suppliers', c.suppliers], ['orders', c.orders]]
-                .filter(x => x[1] != null).map(x => Number(x[1]).toLocaleString('en-GB') + ' ' + x[0]).join(', ') : '';
             const paint = () => {
-                const run = st && st.run, up = st && st.upload, running = !!(run && run.state === 'running');
+                const run = st && st.run, up = st && st.upload;
+                const running = !!(run && (run.state === 'running' || (run.state === 'finishing' && !run.words)));
                 fileLine.textContent = up ? 'Arrived whole: ' + (up.bytes / 1048576).toFixed(1) + ' MB'
                     + (up.exported_at ? ', exported ' + fmtDate(up.exported_at) + ', ' + londonHM(up.exported_at) : '') + '.' : '';
                 result.innerHTML = '';
-                if (st && st.live) {
-                    result.append(el('p', 'stock-move-good', stockMoveRowWords(st)));
-                } else if (!run) {
-                    result.append(el('p', 'field-help', 'Check the export once the names are matched. Nothing changes until you move it in.'));
-                } else if (running) {
-                    const w = el('p', 'stock-move-wait'); w.append(loader(), document.createTextNode(run.kind === 'move'
-                        ? 'Moving in. This can take a few minutes: the window can be closed and opened again.'
-                        : 'Checking every line, history entry and figure. This can take a few minutes.'));
-                    result.append(w);
-                } else if (run.state === 'passed') {
-                    result.append(el('p', 'stock-move-good', 'Proven: ' + counts(run.counts) + ' match the stock app’s export exactly.'));
-                } else if (run.state === 'failed' && (run.differences || []).length) {
+                const [tone, text] = stockMoveSays(st);
+                if (run && run.state === 'failed' && (run.differences || []).length) {
                     result.append(el('p', 'stock-move-bad', run.words || 'The export and what Reactor would hold differ.'));
                     const ul = el('ul', 'stock-move-diffs');
                     ul.tabIndex = 0; ul.setAttribute('aria-label', 'The differences');   // it scrolls: reachable by keyboard
                     run.differences.forEach(d => ul.append(el('li', null, d)));
                     if (run.more) ul.append(el('li', null, 'and ' + run.more + ' more'));
                     result.append(ul);
+                } else if (tone === 'wait') {
+                    const w = el('p', 'stock-move-wait'); w.append(loader(), document.createTextNode(text));
+                    result.append(w);
                 } else {
-                    result.append(el('p', 'stock-move-bad', run.words || 'That did not finish.'));
+                    result.append(el('p', tone === 'good' ? 'stock-move-good' : tone === 'bad' ? 'stock-move-bad' : 'field-help', text));
                 }
                 const quiet = st && st.queue && st.queue.pending;
                 if (quiet && !(st && st.live)) result.append(el('p', 'field-help', quiet + ' made order' + (quiet === 1 ? '' : 's')
@@ -136,9 +151,10 @@
                 if (closed) return;
                 drawPeople(); paint();
                 clearTimeout(poll);
-                const running = !!(st.run && st.run.state === 'running');
+                const run = st.run;
+                const running = !!(run && (run.state === 'running' || (run.state === 'finishing' && !run.words)));
                 if (running) poll = setTimeout(refresh, 2000);
-                else if (wasRunning && st.live) stockMoveArrived();
+                else if (wasRunning && run && run.kind === 'move' && run.state === 'done') stockMoveArrived();
                 wasRunning = running;
             };
             choose.onclick = () => file.click();

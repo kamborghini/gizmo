@@ -728,18 +728,27 @@ def t_the_stock_export_reads_one_moment():
     """On the evening the export reads the production database itself, read
     only. Every table must come from the same moment, or a change landing
     between two tables' reads shows up as a difference the proof cannot
-    explain (or, worse, as two halves that agree with each other): one
-    REPEATABLE READ transaction, every table read inside it. The suite cannot
-    run the exporter (it needs the stock app's Python and code), so the
-    words are checked; tools/stock_move/selfcheck.py --database-url runs it on
-    a real Postgres."""
+    explain (or, worse, as two halves that agree with each other).
+
+    A session-wide SET run when psycopg2 connects lands inside a transaction
+    that the pool rolls back, so it never took (review, 26 Oct 2026): the
+    snapshot is set as the first statement of the one transaction every
+    table is read in, and the exporter asks Postgres what it got and refuses
+    to export otherwise. The suite cannot run the exporter (it needs the
+    stock app's Python and code), so the words are checked; selfcheck.py
+    --database-url runs it on a real Postgres and checks what it recorded."""
     src = open(os.path.join(HERE, "tools", "stock_move", "export_from_stock_app.py"), encoding="utf-8").read()
-    ok("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY" in src,
-       "a Postgres session reads one snapshot, read only")
+    ok("SET SESSION CHARACTERISTICS" not in src, "no session-wide SET that a rollback undoes")
     body = src[src.index("def dump_tables("):src.index("def figures(")]
     eq(body.count("engine.connect()"), 1, "every table is read on one connection, in one transaction")
-    ok(body.index("with engine.connect() as conn:") < body.index("for name in TABLES:") < body.index("seqs = sequences(conn"),
-       "the tables and the sequences inside it")
+    block = body[body.index("with engine.connect() as conn:"):]
+    first = block.index("conn.exec_driver_sql(")
+    ok(block[first:].startswith('conn.exec_driver_sql("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")'),
+       "the snapshot is the transaction's first statement")
+    ok(first < block.index("inspect(conn)") < block.index("for name in TABLES:") < block.index("seqs = sequences(conn"),
+       "then the table names, the tables and the sequences, all inside it")
+    ok("SHOW transaction_isolation" in body and "SHOW transaction_read_only" in body and "SystemExit" in body,
+       "and it checks what Postgres gave it, refusing otherwise")
     check = open(os.path.join(HERE, "tools", "stock_move", "selfcheck.py"), encoding="utf-8").read()
-    ok('add_argument("--database-url"' in check, "the selfcheck can build its invented data in a real Postgres")
-
+    ok('add_argument("--database-url"' in check and "source_session" in check,
+       "the selfcheck can build its invented data in a real Postgres and checks the session the export recorded")

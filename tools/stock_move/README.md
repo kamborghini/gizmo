@@ -135,10 +135,14 @@ reach.
    names, press **Check**, and once it says **Proven**, **Move in**. It
    converts and proves the same export again, puts exactly what it proved in
    place, and only then puts the stock sheet live: the Stock tab opens for
-   the people matched, the queued orders are booked, and the first stock
-   backup is made.
+   the people matched and the first stock backup is made. The orders that
+   waited are booked on Reactor's next regular round, within about fifteen
+   minutes. If anything after going live does not finish, the window says
+   which step, and it is finished the next time the window or Settings is
+   opened.
 6. **Look.** Scan a few shelf labels on a phone, and check the Overview
-   against the stock app's last screen.
+   against the stock app's last screen. Until the orders that waited are
+   booked (step 5), the Overview is higher by exactly their glass.
 7. **Afterwards.** Leave the stock app switched off and keep its database
    (and the final export, outside every repository) until the next quarter
    close; switching back is possible only in the first few days, re-entering

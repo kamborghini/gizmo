@@ -595,6 +595,18 @@ def _private(path: str, text: str) -> None:
 
 
 def main(argv=None) -> int:
+    """The command, saying so when it stops on something it did not expect
+    (exit 4), so a crash on real data is never read as differences (exit 1)."""
+    try:
+        return _main(argv)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"refused: the converter stopped: {type(e).__name__}: {e}", file=sys.stderr)
+        return 4
+
+
+def _main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--export", required=True)
     ap.add_argument("--list-people", action="store_true", help="print the usernames that need an account, and stop")

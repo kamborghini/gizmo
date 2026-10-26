@@ -284,3 +284,132 @@ def t_an_interrupted_stock_run_says_so_and_can_run_again():
     ok("run it again" in run["words"].lower(), run)
     _move("check", people=people)
     eq(_move_wait()["run"]["state"], "passed")
+
+# ---- the review's fixes (26 Oct 2026) ----------------------------------------------------
+
+@test
+def t_a_stock_converter_crash_is_said_not_counted():
+    """A converter that crashes on real data is not "0 differences": it says
+    it stopped and why, and the move says nothing was moved."""
+    from gizmo import stock_move
+    broken = {"format": "stock-export-1", "now": "2026-10-22T12:00:00+00:00",
+              "tables": {"items": {"columns": ["id"], "count": 1, "rows": [{"id": 1}], "missing": False}}}
+    ef, pf = _stock_export_files("crash", export=broken)
+    r = _stock_tool("--export", ef, "--people", pf, "--out", _stock_out("crash"))
+    eq(r.returncode, 4, r.stdout + r.stderr)
+    ok("refused: the converter stopped:" in r.stderr, r.stderr[-300:])
+    saved = stock_move._tool
+    try:
+        stock_move._tool = lambda args, timeout: (1, "", "Traceback (most recent call last):\nKeyError: 'key'")
+        run = {"kind": "check", "state": "running", "at": "2026-10-26T18:00:00+00:00", "by": "u", "sha256": "x",
+               "people": {}}
+        _move_fresh()
+        stock_move._execute(run)
+    finally:
+        stock_move._tool = saved
+    eq(run["state"], "stopped", run)
+    ok("differences" not in run["words"] and "Nothing was moved" in run["words"], run["words"])
+
+@test
+def t_a_finished_stock_run_is_never_called_interrupted():
+    """status() asks whether the worker is alive before it reads the run, so a
+    run that finishes between the two is never stamped "interrupted"."""
+    from gizmo import stock_move
+    _move_fresh()
+    ensure_auth()
+    stock_move._write_run({"kind": "check", "state": "running", "at": "2026-10-26T18:00:00+00:00", "by": "u",
+                           "sha256": "x", "people": {}})
+    class Finishing:
+        def is_alive(self):
+            stock_move._write_run({"kind": "check", "state": "passed", "at": "2026-10-26T18:00:00+00:00", "by": "u",
+                                   "sha256": "x", "people": {}})
+            return False
+    stock_move._worker = Finishing()
+    eq(stock_move.status(APP_AUTH["master"])["run"]["state"], "passed")
+    stock_move._worker = None
+
+def _move_through_install(people):
+    """A move that has installed and gone live, its last steps not yet run (as
+    if Reactor restarted right after): the state a deploy on the evening can leave."""
+    from gizmo import stock_move
+    _move_upload()
+    _move("check", people=people)
+    eq(_move_wait()["run"]["state"], "passed")
+    saved = stock_move._finish
+    try:
+        stock_move._finish = lambda *a, **k: None
+        _move("move", people=people)
+        stock_move._worker.join(120)
+    finally:
+        stock_move._finish = saved
+    stock_move._worker = None
+
+@test
+def t_a_stock_move_finishes_after_a_restart():
+    """Live, but stopped before the Stock tab was granted, the queue retried,
+    the first backup made and the history line written: the next look at
+    where the move stands finishes it, and the window says so."""
+    from gizmo import stock_move, stock_link
+    def go():
+        _move_fresh()
+        ensure_auth()
+        keeper, _s, _p = ready_user("Stock Keeper", "stock.keeper")
+        stock_link._write_zeta_pending({"1001": {"op": "book", "at": "2026-10-26T18:00:00+00:00", "by": None,
+                                                 "tries": 20, "stuck": True}})
+        _move_through_install({"someone": keeper})
+        ok(stock.is_live(), "the stores are in and the sheet is live")
+        eq(stock_move._read("run.json")["state"], "finishing")
+        ok("stock" not in team._user_tabs(keeper), "not yet granted")
+        d = _move("status")[1]
+        eq(d["run"]["state"], "done", d["run"])
+        ok("stock" in team._user_tabs(keeper), "granted")
+        eq(stock_link._load_zeta_pending()["1001"].get("tries"), 0)
+        eq(len([b for b in stock_store.list_backups() if b.get("format") != "legacy-fernet"]), 1)
+        eq(stock_store.read_history()[-1]["action"], "moved_in")
+        eq(sorted(stock_store.load_settings()["moved_in"]["done"]), ["backup", "history", "queue", "tabs"])
+        eq(_move("status")[1]["run"]["state"], "done", "and finishing twice changes nothing")
+        eq(len([b for b in stock_store.list_backups() if b.get("format") != "legacy-fernet"]), 1)
+        _move_fresh()
+    with_accounts(go)
+
+@test
+def t_a_stock_move_step_that_fails_is_said_and_finished_later():
+    from gizmo import stock_move, stock_backups
+    _move_fresh()
+    ensure_auth()
+    _move_through_install({"someone": APP_AUTH["master"]})
+    saved = stock_backups.make_backup
+    try:
+        def no_room(who):
+            raise OSError("No space left on device")
+        stock_backups.make_backup = no_room
+        d = _move("status")[1]
+    finally:
+        stock_backups.make_backup = saved
+    eq(d["run"]["state"], "finishing", d["run"])
+    ok("first stock backup" in d["run"]["words"] and "tried again" in d["run"]["words"], d["run"]["words"])
+    eq(_move("status")[1]["run"]["state"], "done", "finished on the next look")
+    _move_fresh()
+
+@test
+def t_a_stock_move_leaves_no_copy_behind():
+    """The export and every converted copy are real data: a check leaves no
+    copy, and once moved in the export goes too. What was at the live paths
+    before is kept, set aside, and the move records where."""
+    from gizmo import stock_move
+    _move_fresh()
+    ensure_auth()
+    stock_store.write_settings({"meta": {"left": "from a rehearsal"}})
+    people = {"someone": APP_AUTH["master"]}
+    _move_upload()
+    _move("check", people=people)
+    eq(_move_wait()["run"]["state"], "passed")
+    eq([n for n in os.listdir(stock_move.move_dir()) if n.startswith("run-")], [], "a check leaves no copy")
+    _move("move", people=people)
+    eq(_move_wait()["run"]["state"], "done")
+    left = sorted(os.listdir(stock_move.move_dir()))
+    eq([n for n in left if n.startswith(("run-", "export", "upload"))], [], "the export and the copies are gone: %r" % left)
+    aside = stock_store.load_settings()["moved_in"].get("set_aside")
+    ok(aside and os.path.isdir(aside) and os.path.dirname(aside) == stock_move.move_dir(), "what was there is kept: %r" % aside)
+    eq(json.load(open(os.path.join(aside, "stock_settings.json")))["meta"], {"left": "from a rehearsal"})
+    _move_fresh()
