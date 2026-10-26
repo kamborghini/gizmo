@@ -319,9 +319,12 @@ def status(uid: str) -> dict:
     settings = stock_store.load_settings()
     users = team._load_users()["users"]
     pending = stock_link._load_zeta_pending()
-    return {"live": bool(settings.get("live_since")), "moved_in": settings.get("moved_in"),
+    moved = settings.get("moved_in")
+    if isinstance(moved, dict):
+        moved = dict(moved, by_name=team._team_name(moved.get("by")) or "")
+    return {"live": bool(settings.get("live_since")), "moved_in": moved,
             "upload": {k: meta.get(k) for k in ("bytes", "sha256", "exported_at", "at")} if done else None,
             "names": meta.get("names") if done else None,
-            "accounts": sorted(({"id": k, "name": u.get("name") or u.get("username") or k}
+            "accounts": sorted(({"id": k, "name": u.get("name") or u.get("username") or k, "username": u.get("username") or ""}
                                 for k, u in users.items() if not u.get("deleted")), key=lambda a: a["name"].lower()),
             "run": run, "queue": {"pending": len(pending), "stuck": sum(1 for e in pending.values() if e.get("stuck"))}}

@@ -2394,7 +2394,7 @@
   "body": {
    "op": "status"
   },
-  "source": "tests/dispatch/stock-move.py:142"
+  "source": "static/src/js/stock-move.js:134"
  },
  {
   "path": "/api/stock/move",
@@ -2406,7 +2406,7 @@
    "text": "{\"format\": \"stock-export-1\"",
    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   },
-  "source": "tests/dispatch/stock-move.py:135"
+  "source": "static/src/js/stock-move.js:156"
  },
  {
   "path": "/api/stock/move",
@@ -2416,7 +2416,7 @@
     "someone": "acct-1"
    }
   },
-  "source": "tests/dispatch/stock-move.py:196"
+  "source": "static/src/js/stock-move.js:165"
  },
  {
   "path": "/api/stock/move",
@@ -2426,6 +2426,6 @@
     "someone": "acct-1"
    }
   },
-  "source": "tests/dispatch/stock-move.py:210"
+  "source": "static/src/js/stock-move.js:165"
  }
 ]

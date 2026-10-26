@@ -127,13 +127,16 @@
                 gm.connected ? ((gm.address || 'Connected') + '. The Inbox tab tracks who owns each email.')
                 : gm.client ? 'Ready to connect: open the Inbox tab for the connect link.'
                 : 'Not set up yet. Steps on the Inbox tab.'));
-            // The stock bridge: whether Mark made is reaching the stock app.
+            // The stock link: whether Mark made is reaching the stock sheet (the stock app's, before the move).
             const sb = s.stock_bridge || {};
             if (sb.configured || sb.pending) {
-                host.append(connRow('Stock app', sb.configured && !sb.pending ? 'on' : 'mid',
+                const here = stockLive();
+                host.append(connRow(here ? 'Stock link' : 'Stock app', sb.configured && !sb.pending ? 'on' : 'mid',
                     !sb.configured ? 'Not set up: made glass is not booked against stock.'
-                    : sb.pending ? (sb.pending + ' booking(s) waiting to reach the stock app'
+                    : sb.pending ? (sb.pending + (here ? ' booking(s) waiting to be booked on the Stock tab'
+                                                     : ' booking(s) waiting to reach the stock app')
                         + (sb.error ? ' (' + sb.error + ')' : '') + '. The app retries on its own.')
+                    : here ? 'Made orders book their glass on the Stock tab automatically.'
                     : 'Made orders book their glass at the stock app automatically.'));
             }
             // Errors the app hit on its own: visible here whether or not the alert
@@ -280,6 +283,24 @@
                 };
                 rs.onclick = () => rsInput.click();
                 bkActs.append(rs, rsInput);
+            }
+            // Moving the stock sheet in (the switch: js/stock-move.js), the owner's alone.
+            if (!teamMe || teamMe.role === 'master') {
+                const mvRow = el('div', 'setting-row');
+                const mvText = el('div');
+                const mvSub = el('div', 'setting-sub', stockMoveRowWords({ live: stockLive() }));
+                mvText.append(el('div', 'setting-title', 'Stock sheet'), mvSub);
+                const mvActs = el('div', 'row-acts');
+                if (!stockLive()) {
+                    const mvBtn = textButton('Move the stock sheet in');
+                    mvBtn.onclick = () => openStockMove(mvBtn);
+                    mvActs.append(mvBtn);
+                } else {
+                    api('/api/stock/move', { op: 'status' }).then(st => { mvSub.textContent = stockMoveRowWords(st); })
+                        .catch(() => { /* the row keeps its general words */ });
+                }
+                mvRow.append(mvText, mvActs);
+                host.append(mvRow);
             }
             /* The camera test (a throwaway, 20 Oct 2026: see js/camera-test.js),
                the owner's alone, like the backup buttons above. */

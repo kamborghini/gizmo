@@ -16098,6 +16098,75 @@ def t_a_phone_count_says_what_the_shelf_showed():
     eq(got["second"], [{"id": 3, "current": 4, "seen": 6}, {"id": 9, "current": 10, "seen": 50}], "so the second Save keeps them")
     ok(got["cleared"], "and a save lets them go")
 
+
+@test
+def t_an_export_is_sent_in_parts_that_join_up():
+    """The stock app's export may run to tens of megabytes: the page sends it
+    in parts that join back to the file exactly, never cutting a character in
+    two (an emoji is two code units; half of one would break the checksum)."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function stockMoveParts(") + r"""
+const plain = 'a'.repeat(10000);
+const emoji = 'x'.repeat(4095) + '\u{1F600}' + 'y'.repeat(5000);
+const p1 = stockMoveParts(plain, 4096), p2 = stockMoveParts(emoji, 4096);
+console.log(JSON.stringify({ sizes: p1.map(p => p.length), joined: p1.join('') === plain && p2.join('') === emoji,
+  most: Math.max(...p2.map(p => p.length)), halves: p2.some(p => /[\uD800-\uDBFF]$/.test(p) || /^[\uDC00-\uDFFF]/.test(p)) }));"""
+    eq(_run_node(js), {"sizes": [4096, 4096, 1808], "joined": True, "most": 4096, "halves": False})
+
+
+@test
+def t_a_stock_username_is_matched_to_its_person():
+    """Each stock app username is offered its Reactor account first when one
+    name fits it alone; anything else is left for the owner to choose."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function stockMoveGuess(") + r"""
+const people = [{ id: 'u1', name: 'Cameron' }, { id: 'u2', name: 'Owen Price' }];
+console.log(JSON.stringify([stockMoveGuess('cameron', people), stockMoveGuess('Owen', people), stockMoveGuess('zed', people),
+  stockMoveGuess('owen', people.concat([{ id: 'u3', name: 'Owen Hale' }]))]));"""
+    eq(_run_node(js), ["u1", "u2", "", ""])
+
+
+@test
+def t_move_in_waits_for_a_passing_check_of_this_export():
+    """Move in is offered only after a check of this export, matched to these
+    people, has passed: as the server insists, so the button never promises
+    what the server would refuse."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function stockMoveReady(") + r"""
+const st = { live: false, upload: { sha256: 'abc' }, names: { history: ['someone'], logins: ['someone'] },
+  run: { kind: 'check', state: 'passed', sha256: 'abc', people: { someone: 'u1' } } };
+const v = (o, p) => stockMoveReady(Object.assign({}, st, o), p || { someone: 'u1' });
+console.log(JSON.stringify([v({}), v({}, { someone: 'u2' }), v({}, {}), v({ run: Object.assign({}, st.run, { state: 'failed' }) }),
+  v({ upload: { sha256: 'def' } }), v({ run: Object.assign({}, st.run, { kind: 'move' }) }), v({ live: true }), v({ run: null })]));"""
+    eq(_run_node(js), [True, False, False, False, False, False, False, False])
+
+
+@test
+def t_the_stock_app_is_named_only_before_the_move():
+    """Once the stock sheet has moved in, nothing on the page sends people to
+    the stock app: the link's row and the day sheet name the Stock tab."""
+    conn = fn_src("async function loadConnections(")
+    ok("stockLive()" in conn and "booked on the Stock tab" in conn and "to reach the stock app" in conn, "the link's row says both, by the move")
+    usage = fn_src("function openStockUsage(")
+    ok(usage.count("stockLive()") >= 2 and "to the Stock tab?" in usage and "in the stock mapping on the Stock tab" in usage,
+       "and so does the day sheet")
+
+
+@test
+def t_moving_in_is_the_owners():
+    """Settings has a Stock sheet row for the owner alone: before the move it
+    opens the move, after it says when it moved in."""
+    conn = fn_src("async function loadConnections(")
+    row = conn[conn.index("// Moving the stock sheet in"):conn.index("openStockMove(")]
+    ok("if (!teamMe || teamMe.role === 'master')" in row and "if (!stockLive())" in row, "drawn for the owner alone, the move only before it")
+    ok("Moved in on" in fn_src("function stockMoveRowWords("), "after the move, when")
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

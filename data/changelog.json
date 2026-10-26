@@ -1,6 +1,17 @@
 {
  "releases": [
   {
+   "date": "2026-10-26",
+   "title": "The stock sheet can move in",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The owner can now move the stock sheet into Reactor from Settings: Reactor checks the stock app's export line by line first, and changes nothing until it has proven every figure. Until then everything works as before."
+    }
+   ]
+  },
+  {
    "date": "2026-10-23",
    "title": "The Stock tab, ready to move in",
    "items": [
