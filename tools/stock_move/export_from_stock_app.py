@@ -92,10 +92,13 @@ def read_only_engine(url: str):
         url = url.replace("postgres://", "postgresql://", 1)
     engine = create_engine(url)
 
+    # Read only, and every table from one moment: the tables are read in one
+    # transaction (dump_tables), and REPEATABLE READ makes it one snapshot, so
+    # a change landing between two tables' reads cannot split the export.
     @event.listens_for(engine, "connect")
     def _read_only(dbapi_conn, _record):
         cur = dbapi_conn.cursor()
-        cur.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
+        cur.execute("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         cur.close()
     return engine
 

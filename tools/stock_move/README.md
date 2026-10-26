@@ -26,6 +26,12 @@ that nothing was lost or changed on the way.
        --stock-app <stock app> --reactor-python <Reactor's python>
    ```
 
+   On a throwaway Postgres as well, before the evening, so the exporter's
+   Postgres path (a read-only session reading one snapshot, the sequences)
+   has run once on invented data: start an empty Postgres database made for
+   this, then add `--database-url postgresql://...` (that database) to the
+   command above. The check creates the stock app's tables in it.
+
 ## The export holds real data
 
 Stock levels, prices, supplier contacts and who changed what. So:
@@ -77,8 +83,28 @@ check that the proof bites, one line's count was changed by one in a copy of
 the converted stores: the proof named that line and field, and the figures
 it moves.
 
-## The real move
+## The export from the live database
 
-The same commands against a copy of the production database (a Postgres
-dump restored locally, or a direct read-only URL), on the evening of the
-switch. The steps around it are in plan 4 of the stock move.
+The exporter reads the live database directly, read only, every table from
+one moment (one REPEATABLE READ transaction), so it can run on any day as a
+rehearsal and changes nothing. Cameron runs it, on the Mac that has the stock
+app's folder and its `.venv`:
+
+1. Copy the stock app's database's public connection URL (the one that
+   works from outside Railway) from its service in the Railway dashboard.
+2. In a terminal, from this repository's folder:
+
+   ```bash
+   mkdir -p ~/stock-move
+   read -rs STOCK_DB_URL && export STOCK_DB_URL
+   <stock app>/.venv/bin/python tools/stock_move/export_from_stock_app.py \
+       --stock-app <stock app> --database-url "$STOCK_DB_URL" --out ~/stock-move/export.json
+   unset STOCK_DB_URL
+   ```
+
+   `read -rs` takes the pasted URL without showing it or keeping it in the
+   shell's history.
+
+The export is then moved in from Reactor itself (Settings, Move the stock
+sheet in), which converts and proves it again on arrival. The steps of the
+evening are under "The switch" below.

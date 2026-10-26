@@ -718,3 +718,24 @@ def t_the_stock_proof_checks_outstanding_orders_match_on_order():
     found = stock_import.prove(export, out)
     eq(len(found), 1, found)
     ok("orders" in found[0] and "6" in found[0] and "5" in found[0], found[0])
+
+@test
+def t_the_stock_export_reads_one_moment():
+    """On the evening the export reads the production database itself, read
+    only. Every table must come from the same moment, or a change landing
+    between two tables' reads shows up as a difference the proof cannot
+    explain (or, worse, as two halves that agree with each other): one
+    REPEATABLE READ transaction, every table read inside it. The suite cannot
+    run the exporter (it needs the stock app's Python and code), so the
+    words are checked; tools/stock_move/selfcheck.py --database-url runs it on
+    a real Postgres."""
+    src = open(os.path.join(HERE, "tools", "stock_move", "export_from_stock_app.py"), encoding="utf-8").read()
+    ok("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY" in src,
+       "a Postgres session reads one snapshot, read only")
+    body = src[src.index("def dump_tables("):src.index("def figures(")]
+    eq(body.count("engine.connect()"), 1, "every table is read on one connection, in one transaction")
+    ok(body.index("with engine.connect() as conn:") < body.index("for name in TABLES:") < body.index("seqs = sequences(conn"),
+       "the tables and the sequences inside it")
+    check = open(os.path.join(HERE, "tools", "stock_move", "selfcheck.py"), encoding="utf-8").read()
+    ok('add_argument("--database-url"' in check, "the selfcheck can build its invented data in a real Postgres")
+
