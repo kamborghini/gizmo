@@ -15713,11 +15713,11 @@ def t_unsaved_stock_counts_survive_a_reload():
 
 
 @test
-def t_the_stock_row_save_is_an_ordinary_button():
-    """Call 6: Reactor's one teal button per screen; several edited rows no
-    longer show several teal Saves."""
+def t_the_stock_row_save_is_teal_as_today():
+    """Call 6, Cameron's answer (26 Oct 2026): "Keep teal Saves (as today)".
+    An edited row's Save is the teal one, as it is in the stock sheet now."""
     fn = fn_src("function stockInvRow(")
-    ok("textButton('Save', { cls: 'stk-save' })" in fn and "kind: 'primary'" not in fn, fn[:300])
+    ok("textButton('Save', { kind: 'primary', cls: 'stk-save' })" in fn, fn[:300])
 
 
 @test
