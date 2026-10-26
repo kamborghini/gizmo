@@ -170,6 +170,16 @@ def recover() -> bool:
         return True
 
 
+def forget_memory() -> None:
+    """Forget what memory holds of the stock stores (the history's and the
+    snapshots' indexes, each store's cached copy), so the next read reads
+    the files: the move puts new ones in place under a running server."""
+    with _lock:
+        _mem.clear()
+        for path in stock_store._paths() + tuple(stock_store._live_files()):
+            jsonstore._forget_store(path)
+
+
 def state() -> dict:
     """Every stock document, after any half-made change is finished."""
     with _lock:
