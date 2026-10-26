@@ -2,6 +2,8 @@
 """Convert the stock app's export into Reactor's stock stores, and prove it.
 
     python tools/stock_import.py --export FILE --people FILE --out DIR [--report FILE]
+            [--json-report FILE] [--install]
+    python tools/stock_import.py --export FILE --list-people
 
 The export comes from tools/stock_move/export_from_stock_app.py (see the
 README beside it). `--people` maps each username in the stock app's history
@@ -22,6 +24,12 @@ the export:
 
 Exit 0 only when the proof is empty. The output holds real data, so DIR and
 the report are refused anywhere inside a git working tree.
+
+Reactor's own Move-in (Settings, owner only) runs this as a child process:
+--list-people for the names to match to accounts, a check (convert and
+prove, nothing installed), then --install, which puts the proven stores
+where the stock sheet reads them (exit 3, nothing done, if it has already
+moved in). Reactor then sets the moment it went live.
 """
 import argparse
 import hashlib
@@ -30,7 +38,7 @@ import os
 import re
 import sys
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -209,10 +217,12 @@ def convert(export: dict, people: dict, out_dir: str) -> None:
         periods = records("periods")
         stock_store.write_periods({"periods": periods, "next_id": next_id("periods", periods)})
         alerts = records("alerts")
-        stock_store.write_alerts({"alerts": alerts, "next_id": next_id("alerts", alerts)})
+        meta = {r["key"]: r["value"] for r in _rows(export, "meta")}
+        stock_store.write_alerts({"alerts": alerts, "next_id": next_id("alerts", alerts),
+                                  "standing": standing(items, meta, alerts)})
         suppliers = records("supplier_contacts")
         stock_store.write_suppliers({"suppliers": suppliers, "next_id": next_id("supplier_contacts", suppliers)})
-        settings = {"meta": {r["key"]: r["value"] for r in _rows(export, "meta")}}
+        settings = {"meta": meta}
         families = (export.get("bridge_rules") or {}).get("glass_families")
         if families:
             settings["glass_families"] = dict(families)
@@ -228,6 +238,19 @@ def convert(export: dict, people: dict, out_dir: str) -> None:
         stock_store.write_orders({"orders": orders, "next_id": len(orders) + 1})
         stock_store.write_people({"people": dict(people), "logins": {
             r["username"]: _record("users", r, present) for r in logins}})
+
+
+# ---- warnings raised once ---------------------------------------------------------
+
+def standing(items: list, meta: dict, alerts: list) -> dict:
+    """The warnings the stock app already raised that still stand: each line
+    the snapshot's rule warns about now and that already has a warning of
+    that kind (seen or not). Reactor raises a line's warning once (section
+    7), and without this the first snapshot after the switch raised every
+    one of them again."""
+    had = {(a.get("item_key") or "", a.get("kind")) for a in alerts}
+    return {a["item_key"]: a["kind"] for a in stock_figures.detect_anomalies(items, meta)
+            if a.get("item_key") and (a["item_key"], a["kind"]) in had}
 
 
 # ---- the orders still outstanding, rebuilt -------------------------------------
@@ -294,8 +317,13 @@ def rebuild_orders(export: dict, items: list, people: dict) -> list:
     for g in groups:
         if any(l["outstanding"] for l in g["lines"]):
             add(g, False)
+    # What no line accounts for was ordered before any of them: one second
+    # before the oldest order rebuilt (a delivery counts against the oldest
+    # open order first), or the export's own time when there is none.
+    oldest = min((_when(o["at"]) for o in orders), default=None)
+    before = _utc_iso((oldest - timedelta(seconds=1)).isoformat()) if oldest else export.get("now")
     for supplier, lines in extra.items():
-        add({"supplier": supplier, "reference": "", "at": export.get("now"), "user": "", "lines": lines}, True)
+        add({"supplier": supplier, "reference": "", "at": before, "user": "", "lines": lines}, True)
     return orders
 
 
@@ -529,6 +557,10 @@ def prove(export: dict, out_dir: str) -> list:
             if want.get(family) != got.get(family):
                 found.append(f"bridge: {family.upper()} lines are matched to {got.get(family)!r}; "
                              f"the stock app matches them to {want.get(family)!r}")
+    want = standing(items, settings.get("meta", {}), alerts.get("alerts", []))
+    if alerts.get("standing") != want:
+        found.append(f"alerts: the warnings standing are {alerts.get('standing')!r}; the lines warned about now "
+                     f"that already had that warning are {want!r}")
     _labels(found, items)
     _figures(found, export, items, settings.get("meta", {}), snapshots, periods.get("periods", []),
              suppliers.get("suppliers", []))
@@ -537,19 +569,60 @@ def prove(export: dict, out_dir: str) -> list:
 
 # ---- the command -----------------------------------------------------------
 
+def names(export: dict) -> dict:
+    """The stock app usernames that need a Reactor account: who the history
+    names (the app's own entries left out) and who could sign in."""
+    if export.get("format") != FORMAT:
+        raise ValueError(f"not a stock export ({export.get('format')!r}, expected {FORMAT!r})")
+    return {"history": sorted({str(r.get("user")) for r in _rows(export, "audit_log")} - NOBODY),
+            "logins": sorted({str(r.get("username")) for r in _rows(export, "users")})}
+
+
+def counts(out_dir: str) -> dict:
+    """How many of each record the converted stores hold, for the page."""
+    with stock_store.rooted(out_dir):
+        return {"items": len(stock_store.load_items().get("items") or {}), "history": len(stock_store.read_history()),
+                "snapshots": len(stock_store.read_snapshots()), "quarters": len(stock_store.load_periods().get("periods") or []),
+                "warnings": len(stock_store.load_alerts().get("alerts") or []),
+                "suppliers": len(stock_store.load_suppliers().get("suppliers") or []),
+                "orders": len(stock_store.load_orders().get("orders") or []), "backups": len(stock_store.list_backups())}
+
+
+def _private(path: str, text: str) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--export", required=True)
-    ap.add_argument("--people", required=True, help='{"stock app username": "Reactor account id"}')
-    ap.add_argument("--out", required=True, help="an empty folder outside every repository")
+    ap.add_argument("--list-people", action="store_true", help="print the usernames that need an account, and stop")
+    ap.add_argument("--people", help='{"stock app username": "Reactor account id"}')
+    ap.add_argument("--out", help="an empty folder outside every repository")
     ap.add_argument("--report", help="write the proof here as well (outside every repository)")
+    ap.add_argument("--json-report", help="write the proof and the counts here as JSON (outside every repository)")
+    ap.add_argument("--install", action="store_true",
+                    help="once proven, put the stores where the stock sheet reads them (Reactor sets it live after)")
     args = ap.parse_args(argv)
-    for p in (args.out, args.report):
+    if not args.list_people and not (args.people and args.out):
+        ap.error("--people and --out are needed to convert")
+    for p in (args.out, args.report, args.json_report):
         if p and inside_git_tree(p):
             print(f"refused: {p} is inside a git working tree; the stores hold real data", file=sys.stderr)
             return 2
     with open(args.export, encoding="utf-8") as fh:
         export = json.load(fh)
+    if args.list_people:
+        try:
+            print(json.dumps(names(export)))
+        except ValueError as e:
+            print(f"refused: {e}", file=sys.stderr)
+            return 2
+        return 0
+    if args.install and stock_store.load_settings().get("live_since"):
+        print("refused: the stock sheet has already moved in; nothing was installed", file=sys.stderr)
+        return 3
     with open(args.people, encoding="utf-8") as fh:
         people = json.load(fh)
     try:
@@ -560,11 +633,15 @@ def main(argv=None) -> int:
     found = prove(export, args.out)
     text = "\n".join(found) if found else "proven: every record, field, label and figure matches the export"
     if args.report:
-        fd = os.open(args.report, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text + "\n")
+        _private(args.report, text + "\n")
+    if args.json_report:
+        _private(args.json_report, json.dumps({"proven": not found, "differences": found, "counts": counts(args.out)}))
     print(text if not found else f"{len(found)} differences:\n{text}")
-    return 1 if found else 0
+    if found:
+        return 1
+    if args.install:
+        print(json.dumps(stock_store.install_from(args.out)))
+    return 0
 
 
 if __name__ == "__main__":

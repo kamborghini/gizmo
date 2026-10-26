@@ -300,8 +300,9 @@ _STOCK_COLUMNS = {
                           "min_order", "updated_at"],
 }
 
-def _stock_export(history_user="someone", reorder_point_9=0):
-    """An invented export in the exporter's shape, with the stock app's figures for it."""
+def _stock_export(history_user="someone", reorder_point_9=0, low_lines=False):
+    """An invented export in the exporter's shape, with the stock app's figures for it.
+    low_lines: lines 3 and 7 below their level (line 3 carries a warning for it)."""
     def row(table, **values):
         return {c: values.get(c) for c in _STOCK_COLUMNS[table]}
     def item(id, key, **over):
@@ -315,6 +316,9 @@ def _stock_export(history_user="someone", reorder_point_9=0):
              item(9, "Glass|Red|30|", barcode=None, on_order=None, unit_cost=None, unit_cost_gbp=0.5,
                   reorder_point=reorder_point_9),
              item(11, "Glass|Grey|20|", current=3, unit_cost_gbp=4.0, written_off=True)]
+    if low_lines:
+        items[0].update(current=1, used=9)
+        items[1].update(current=1, used=30)
     snap_items = [row("snapshot_items", id=1, snapshot_id=1, item_key="Glass|Blue|20|", category="Glass",
                       written_off=False, current=8, used=2, current_value=10.0),
                   row("snapshot_items", id=2, snapshot_id=1, item_key="Glass|Blue|20||#2", category="Glass",
