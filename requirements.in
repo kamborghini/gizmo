@@ -33,11 +33,11 @@ pillow==13.0.0
 #   cryptography      statically linked OpenSSL fix, cert-chain blowup, wildcard
 #                     name-constraint bypass (GHSA-537c-gmf6-5ccf and others)
 #   certifi           PYSEC-2026-4320 (21 Oct 2026); fixed in 2026.10.19
-starlette==1.8.0
+starlette==1.10.0
 python-multipart==0.0.32
 cryptography==50.0.2
-certifi==2026.10.19
-boto3==1.43.114
+certifi==2026.10.23
+boto3==1.43.118
 
 # The serial sticker's two codes, generated SERVER-side and placed as data:
 # URIs. The app's own CSP allows no CDN scripts, so a browser QR library was
