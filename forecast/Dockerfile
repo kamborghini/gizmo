@@ -3,7 +3,7 @@
 # RAILWAY_DOCKERFILE_PATH=forecast/Dockerfile) and a cron schedule such as
 # "0 3 * * *". It is separate from the app's own Dockerfile on purpose: the
 # app never carries these libraries.
-FROM python:3.14.8-slim-trixie@sha256:89fb7d3da20043c370643435258bdd7ab755d326d359001d02988ed15ae5219e
+FROM python:3.14.9-slim-trixie@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # The per-variant model's libraries (scikit-learn, LightGBM, CatBoost) are NOT
