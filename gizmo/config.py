@@ -27,7 +27,7 @@ SHOPIFY_STORE      = os.environ.get("SHOPIFY_STORE", "")        # used to pin se
 # revoked (webhooks for up to an hour after), so it is accepted for CHECKING
 # them in that window; it never signs anything and never asks for a token.
 # Unset the rest of the time.
-SHOPIFY_API_SECRET_PREVIOUS = os.environ.get("SHOPIFY_CLIENT_SECRET_PREVIOUS", "")
+SHOPIFY_API_SECRET_PREVIOUS = os.environ.get("SHOPIFY_CLIENT_SECRET_PREVIOUS", "")  # the old app secret, only during a rotation
 
 
 def shopify_secrets() -> list[str]:

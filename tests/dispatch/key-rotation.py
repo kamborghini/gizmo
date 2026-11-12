@@ -100,16 +100,22 @@ def t_a_refusal_from_the_xero_sync_service_is_an_error_on_the_page_not_a_sign_ou
     os.environ["CONNECTOR_URL"] = "https://connector.example.test"
     os.environ["CONNECTOR_TOKEN"] = "reactors-copy-of-the-key"
     try:
-        for status in (401, 403):
+        answers["status"] = 401
+        r = post("/api/connector", {"op": "status"})
+        eq(r.status_code, 502, "the service's 401 is not passed on as a refusal of the person")
+        ok(re.search(r"refused Reactor's key", r.json().get("error", "")), "and the error says it is about the key: " + r.text[:200])
+        ok("no longer matches" in r.json().get("error", ""), "the two copies are out of step")
+        ok(not re.search(r"Railway|CONNECTOR_TOKEN|DASHBOARD_TOKEN", r.json().get("error", "")),
+           "in words, not hosting or setting names")
+        os.environ["CONNECTOR_TOKEN"] = ""
+        r = post("/api/connector", {"op": "status"})
+        eq(r.status_code, 502)
+        ok("holds no key" in r.json().get("error", ""), "with no key at all, it says so rather than a mismatch: " + r.text[:200])
+        os.environ["CONNECTOR_TOKEN"] = "reactors-copy-of-the-key"
+        for status in (403, 500):
             answers["status"] = status
             r = post("/api/connector", {"op": "status"})
-            eq(r.status_code, 502, "the service's %d is not passed on as a refusal of the person" % status)
-            ok(re.search(r"key", r.json().get("error", ""), re.I), "and the error says it is about the key: " + r.text[:200])
-            ok(not re.search(r"Railway|CONNECTOR_TOKEN|DASHBOARD_TOKEN", r.json().get("error", "")),
-               "in words, not hosting or setting names")
-        answers["status"] = 500
-        r = post("/api/connector", {"op": "status"})
-        eq(r.status_code, 500, "any other error the service answers still comes through as it was")
+            eq(r.status_code, status, "a %d (the 403 is the service's own forgery guard, never the key) comes through as it was" % status)
     finally:
         xerosync.httpx = saved[0]
         for k, v in (("CONNECTOR_URL", saved[1]), ("CONNECTOR_TOKEN", saved[2])):
@@ -117,3 +123,40 @@ def t_a_refusal_from_the_xero_sync_service_is_an_error_on_the_page_not_a_sign_ou
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+
+
+
+@test
+def t_a_webhook_signature_with_a_stray_byte_is_refused_not_a_server_error():
+    """Anyone can send a webhook, and the signature header is compared as
+    text: a header holding a byte outside ASCII made the comparison raise, so
+    the door answered 500 rather than 401. Shopify retries a 500, and a
+    stranger's probe should read as what it is."""
+    raw = json.dumps({"id": 991002}).encode()
+    headers = wh_headers(raw, delivery="rotation-5")
+    headers["X-Shopify-Hmac-Sha256"] = b"\xff" * 44   # raw bytes, as a stranger can send them
+    eq(client.post("/webhooks/orders", content=raw, headers=headers).status_code, 401, "the orders door refuses it")
+    eq(client.post("/webhooks/privacy", content=raw, headers=headers).status_code, 401, "and so does the privacy door")
+
+
+@test
+def t_the_previous_secret_left_set_is_said_at_every_start():
+    """Revoking the old secret at Shopify does not stop Reactor accepting it:
+    Reactor checks the signature itself. Left set after the swap, it would be
+    accepted for as long as nobody looked, so every start says it is set."""
+    import logging as _lg
+    seen = []
+    class Grab(_lg.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+    h = Grab()
+    _lg.getLogger().addHandler(h)
+    try:
+        _with_previous_secret(_OLD_APP_SECRET, lambda: server._boot_report())
+        ok(any("previous app secret" in m for m in seen), "a start with it set says so: " + " | ".join(seen)[:300])
+        seen.clear()
+        server._boot_report()
+        ok(not any("previous app secret" in m for m in seen), "and a start without it says nothing about it")
+    finally:
+        _lg.getLogger().removeHandler(h)
+

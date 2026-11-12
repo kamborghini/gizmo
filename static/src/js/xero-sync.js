@@ -6,6 +6,9 @@
            everything and writes nothing, so the numbers on screen are exactly
            what Send will do. */
         let connCache = null;     // last status payload from the service
+        /* The server's words when Xero sync refused Reactor's own key: the
+           service was reached, so the box does not say it could not be. */
+        const KEY_REFUSED = /refused Reactor's key/;
         let connRuns = null;      // recent run records
         let connReview = null;    // the completed dry run awaiting a Send
         /* The per-order equivalent: {order, data} from a check, and it arms

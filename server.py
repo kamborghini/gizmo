@@ -391,6 +391,14 @@ def _boot_report() -> None:
         logger.warning("config: %s", g)
     if not gaps:
         logger.info("config: complete (the full reference is docs/ENVIRONMENT.md)")
+    # Revoking the old secret at Shopify does not stop Reactor accepting it,
+    # since Reactor checks signatures itself: left set after a swap it would be
+    # accepted for as long as nobody looked, so every start says it is set.
+    from gizmo import config as _cfg
+    if _cfg.SHOPIFY_API_SECRET_PREVIOUS:
+        logger.warning("config: SHOPIFY_CLIENT_SECRET_PREVIOUS is set, so the previous app secret is still "
+                       "accepted for session tokens and webhooks. Remove it once the old secret is revoked "
+                       "and an hour has passed.")
     # The stores by size, and what the big ones cost to read. Said once, so a
     # CRM that has quietly grown past what a per-request parse can carry is
     # a line in the boot log rather than a feeling at the desk.

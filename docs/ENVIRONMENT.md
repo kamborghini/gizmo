@@ -87,7 +87,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SHOPIFY_API_SECRET` | `None` | gizmo.config |  |
 | `SHOPIFY_CLIENT_ID` | `""` | gizmo.config, server |  |
 | `SHOPIFY_CLIENT_SECRET` | `""` | gizmo.config, server |  |
-| `SHOPIFY_CLIENT_SECRET_PREVIOUS` | `""` | gizmo.config |  |
+| `SHOPIFY_CLIENT_SECRET_PREVIOUS` | `""` | gizmo.config | the old app secret, only during a rotation |
 | `SHOPIFY_STORE` | `""` | gizmo.config, server | used to pin session tokens to this shop |
 
 ## gizmo/crm.py - CRM: the sales desk, modelled on Pipedrive

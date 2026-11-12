@@ -16204,8 +16204,10 @@ def t_a_sign_in_refusal_in_the_xero_sync_box_is_not_blamed_on_the_connector():
     ok("{ signIn: true }" in block, "a refusal from the door is marked as one")
     ok("throw new Error(text)" not in block and "throw refused()" in block, "and every refusal the door's 401 throws is the marked kind")
     ok("signIn: !!e.signIn" in fn_src("async function refreshConnector("), "the Xero sync box remembers it")
-    ok("connCache.signIn ? '' : 'The connector could not be reached. '" in fn_src("function renderConnector("),
-       "and does not blame the connector for it")
+    render = fn_src("function renderConnector(")
+    ok("connCache.signIn || KEY_REFUSED.test(connCache.error || '') ? '' : 'The connector could not be reached. '" in render,
+       "and does not blame the connector for it, nor for Xero sync refusing Reactor's key")
+    ok(re.search(r"const KEY_REFUSED = /refused Reactor's key/", HTML), "the key refusal is read off the server's own words")
 
 
 if __name__ == "__main__":

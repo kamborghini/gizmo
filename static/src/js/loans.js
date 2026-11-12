@@ -583,7 +583,7 @@
                 box.append(card); return;
             }
             if (connCache.error) {
-                box.append(loadFailure((connCache.signIn ? '' : 'The connector could not be reached. ') + cxDetail(connCache.error), refreshConnector));
+                box.append(loadFailure((connCache.signIn || KEY_REFUSED.test(connCache.error || '') ? '' : 'The connector could not be reached. ') + cxDetail(connCache.error), refreshConnector));
                 return;
             }
             const st = connCache.data || {};

@@ -70,11 +70,15 @@ def webhook_signed(raw: bytes, sent: str) -> bool:
     signs webhooks with the oldest secret not yet revoked, and for up to an
     hour after a revoke, so with one secret every order update and privacy
     request in that window was refused."""
-    if not sent:
+    if not sent or not config.SHOPIFY_API_SECRET:
         return False
+    # As bytes: anyone can send this header, and compared as text a byte
+    # outside ASCII raised, so the door answered 500 rather than 401. The
+    # server hands headers over decoded as Latin-1, which every byte survives.
+    given = sent.encode("latin-1", "replace")
     for i, secret in enumerate(config.shopify_secrets()):
-        want = base64.b64encode(hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).digest()).decode("ascii")
-        if hmac.compare_digest(want, sent):
+        want = base64.b64encode(hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).digest())
+        if hmac.compare_digest(want, given):
             if i:
                 config.note_previous_secret("webhook")
             return True
