@@ -36,14 +36,27 @@ logger = logging.getLogger("shopify_mcp.copilot")
 def _verify_session_token(token: str) -> dict:
     if not config.SHOPIFY_API_SECRET:
         raise RuntimeError("SHOPIFY_API_SECRET not configured")
-    claims = jwt.decode(
-        token,
-        config.SHOPIFY_API_SECRET,
-        algorithms=["HS256"],
-        audience=config.SHOPIFY_API_KEY or None,
-        leeway=5,
-        options={"require": ["exp", "nbf"], "verify_aud": bool(config.SHOPIFY_API_KEY)},
-    )
+    # The app's secret, then the previous one while it is being rotated: only
+    # a signature that matches neither is a refusal, and a token one of them
+    # signed still has to pass every other check (an expired one stays refused).
+    secrets_ = config.shopify_secrets()
+    for i, secret in enumerate(secrets_):
+        try:
+            claims = jwt.decode(
+                token,
+                secret,
+                algorithms=["HS256"],
+                audience=config.SHOPIFY_API_KEY or None,
+                leeway=5,
+                options={"require": ["exp", "nbf"], "verify_aud": bool(config.SHOPIFY_API_KEY)},
+            )
+        except jwt.InvalidSignatureError:
+            if i == len(secrets_) - 1:
+                raise
+            continue
+        if i:
+            config.note_previous_secret("session token")
+        break
     dest = claims.get("dest") or ""
     # Defense in depth: only accept tokens minted for this store.
     if config.SHOPIFY_STORE:

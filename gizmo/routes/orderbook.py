@@ -5,9 +5,6 @@ their paths are literal, so no request changes hands.
 import logging
 import json
 import time
-import hmac
-import base64
-import hashlib
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
@@ -67,10 +64,7 @@ def register(mcp, registry):
         except Exception:
             return PlainTextResponse("Bad request", status_code=400)
         raw = b"".join(chunks)
-        sent = request.headers.get("x-shopify-hmac-sha256", "")
-        want = base64.b64encode(hmac.new(config.SHOPIFY_API_SECRET.encode("utf-8"),
-                                         raw, hashlib.sha256).digest()).decode("ascii")
-        if not sent or not hmac.compare_digest(want, sent):
+        if not shopify.webhook_signed(raw, request.headers.get("x-shopify-hmac-sha256", "")):
             return PlainTextResponse("Unauthorized", status_code=401)
         # Signed, but for the wrong store: refuse rather than act on it.
         shop = str(request.headers.get("x-shopify-shop-domain") or "")

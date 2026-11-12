@@ -88,6 +88,7 @@ SECTIONS = [
     'stock-ai.py',                       # Stock in Reactor: AI and the chat (plan 2b)
     'stock-screens.py',                  # plan 3: what the Stock tab's screens read, and the tab waiting for the move
     'stock-move.py',                     # plan 4: the switch: the converter's last duties and moving in
+    'key-rotation.py',                   # a key rotation: the previous Shopify secret during the swap, the Xero sync service's refusal
     'runner.py',                         # the runner's own toy tests, and the runner
 ]
 

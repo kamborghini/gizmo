@@ -3424,7 +3424,7 @@ def t_a_rejected_embed_token_is_retried_once_and_a_dead_session_never_loops():
     ok("const reason = (why && why.reason) || 'session';" in fn, "the reason is read off the 401")
     ok("if (reason === 'token' && !opts.retried) {" in fn and "return api(path, payload, { retried: true });" in fn,
        "a rejected embed token is retried once with a fresh one")
-    ok("if (reason === 'token') {\n                        authShow('login');\n                        throw new Error(text);" in fn,
+    ok("if (reason === 'token') {\n                        authShow('login');\n                        throw refused();" in fn,
        "a second rejection is shown, never reloaded")
     ok("if (Date.now() - last > 60000) {" in fn and "sessionStorage.setItem('sc_auth_reload'" in fn, "a dead session reloads at most once a minute")
     ok("sessionStorage.setItem('sc_auth_reason'" in fn, "and the reason is kept for the login screen")
@@ -8006,7 +8006,7 @@ def t_a_starter_password_reaches_the_choose_your_own_card():
     fn = fn[:fn.index("\n        }\n")]
     at = fn.find("if (reason === 'must_change') {")
     ok(at > 0, "a starter password is recognised")
-    ok("authShow('change');" in fn[at:at + 120] and "throw new Error(text);" in fn[at:at + 160],
+    ok("authShow('change');" in fn[at:at + 120] and "throw refused();" in fn[at:at + 160],
        "and answered with the card, not with a sign-out")
     ok(at < fn.find("setAppSession('');"), "before anything wipes the session")
     change = SCRIPT[SCRIPT.index("const r = await authApi('/api/auth/password'"):][:900]
@@ -16192,6 +16192,23 @@ console.log(JSON.stringify({
     ok("Stock tab" in got["finishing"][1], got["finishing"])
     eq(got["done"], ["good", "Moved in on 26 Oct, 18:00 by Cameron. The stock app can stay switched off."])
     eq(got["running"][0], "wait")
+
+@test
+def t_a_sign_in_refusal_in_the_xero_sync_box_is_not_blamed_on_the_connector():
+    """12 Nov 2026: a stale sign-in in the Xero sync box read "The connector
+    could not be reached. Your sign-in has expired. Please log in again.", and
+    the connector was the first thing suspected. A refusal from Reactor's own
+    door carries that it is one, and the box says only what the door said."""
+    api = fn_src("async function api(")
+    block = api[api.index("if (res.status === 401)"):api.index("if (res.status === 429)")]
+    ok("{ signIn: true }" in block, "a refusal from the door is marked as one")
+    ok("throw new Error(text)" not in block and "throw refused()" in block, "and every refusal the door's 401 throws is the marked kind")
+    ok("signIn: !!e.signIn" in fn_src("async function refreshConnector("), "the Xero sync box remembers it")
+    render = fn_src("function renderConnector(")
+    ok("connCache.signIn || KEY_REFUSED.test(connCache.error || '') ? '' : 'The connector could not be reached. '" in render,
+       "and does not blame the connector for it, nor for Xero sync refusing Reactor's key")
+    ok(re.search(r"const KEY_REFUSED = /refused Reactor's key/", HTML), "the key refusal is read off the server's own words")
+
 
 if __name__ == "__main__":
     print("frontend regressions")

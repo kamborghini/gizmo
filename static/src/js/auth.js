@@ -76,6 +76,11 @@
                 try { why = await res.clone().json(); } catch (e) { why = null; }
                 const reason = (why && why.reason) || 'session';
                 const text = (why && why.error) || 'Please log in.';
+                /* Marked, so a panel that shows a failure does not put it down
+                   to its own service: "The connector could not be reached.
+                   Your sign-in has expired." sent people looking at the
+                   connector for what was a sign-in. */
+                const refused = () => Object.assign(new Error(text), { signIn: true });
                 if (reason === 'token' && !opts.retried) {
                     await new Promise(r => setTimeout(r, 1200));
                     return api(path, payload, { retried: true });
@@ -87,7 +92,7 @@
                    exactly that, so a new account could never reach the card. */
                 if (reason === 'must_change') {
                     authShow('change');
-                    throw new Error(text);
+                    throw refused();
                 }
                 if (!path.startsWith('/api/auth/')) {
                     /* Nobody was signed in to begin with: the boot's data calls
@@ -96,11 +101,11 @@
                        cost a reload, and greeted whoever sat down next, after a
                        deliberate Log out too, with "Your sign-in has expired".
                        The sign-in card is authBoot's to show. */
-                    if (!sess && reason === 'session') throw new Error(text);
+                    if (!sess && reason === 'session') throw refused();
                     try { sessionStorage.setItem('sc_auth_reason', JSON.stringify({ reason, text })); } catch (e) {}
                     if (reason === 'token') {
                         authShow('login');
-                        throw new Error(text);
+                        throw refused();
                     }
                     setAppSession('');
                     clearLocalCache(true);
@@ -117,7 +122,7 @@
                         authShow('login');
                     }
                 }
-                throw new Error(text);
+                throw refused();
             }
             if (res.status === 429) {
                 /* A rate limit really does clear in seconds, but the daily AI

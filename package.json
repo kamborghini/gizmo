@@ -17,6 +17,9 @@
   "overrides": {
     "@shopify/ui-extensions": {
       "ts-morph": "^28.0.0"
+    },
+    "@ts-morph/common": {
+      "minimatch": "^11.0.1"
     }
   }
 }

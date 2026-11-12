@@ -1,6 +1,27 @@
 {
  "releases": [
   {
+   "date": "2026-11-12",
+   "title": "Changing keys without anyone being signed out",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": null,
+     "text": "Opening Xero sync while its key no longer matched Reactor's signed you out. It now says the key no longer matches, and you stay signed in."
+    },
+    {
+     "kind": "improved",
+     "tab": null,
+     "text": "While Reactor's Shopify key is being replaced, signing in and Shopify's order and privacy updates keep working with the old key until the change is finished."
+    },
+    {
+     "kind": "fixed",
+     "tab": null,
+     "text": "A sign-in message in the Xero sync box no longer starts with “The connector could not be reached”."
+    }
+   ]
+  },
+  {
    "date": "2026-10-26",
    "title": "The stock sheet can move in",
    "items": [
