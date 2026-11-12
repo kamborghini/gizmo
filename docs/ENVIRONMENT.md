@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-198 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document. `[shop domain]` stands for the shop's own website domain, which those defaults carry.
+199 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document. `[shop domain]` stands for the shop's own website domain, which those defaults carry.
 
 ## server.py
 
@@ -87,6 +87,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SHOPIFY_API_SECRET` | `None` | gizmo.config |  |
 | `SHOPIFY_CLIENT_ID` | `""` | gizmo.config, server |  |
 | `SHOPIFY_CLIENT_SECRET` | `""` | gizmo.config, server |  |
+| `SHOPIFY_CLIENT_SECRET_PREVIOUS` | `""` | gizmo.config |  |
 | `SHOPIFY_STORE` | `""` | gizmo.config, server | used to pin session tokens to this shop |
 
 ## gizmo/crm.py - CRM: the sales desk, modelled on Pipedrive

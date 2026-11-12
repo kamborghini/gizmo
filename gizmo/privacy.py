@@ -21,7 +21,6 @@ import tokenvault
 from gizmo.config import _env_num
 from gizmo import store as jsonstore
 from gizmo import shopify
-import base64
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from gizmo import background
@@ -1725,10 +1724,7 @@ async def _webhook_body(request: Request):
     except Exception:
         return None, PlainTextResponse("Bad request", status_code=400)
     raw = b"".join(chunks)
-    sent = request.headers.get("x-shopify-hmac-sha256", "")
-    want = base64.b64encode(hmac.new(config.SHOPIFY_API_SECRET.encode("utf-8"),
-                                     raw, hashlib.sha256).digest()).decode("ascii")
-    if not sent or not hmac.compare_digest(want, sent):
+    if not shopify.webhook_signed(raw, request.headers.get("x-shopify-hmac-sha256", "")):
         return None, PlainTextResponse("Unauthorized", status_code=401)
     shop = str(request.headers.get("x-shopify-shop-domain") or "")
     if config.SHOPIFY_STORE and not shop.lower().startswith(config.SHOPIFY_STORE.split(".")[0].lower() + "."):

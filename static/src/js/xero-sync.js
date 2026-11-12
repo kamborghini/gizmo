@@ -793,7 +793,7 @@
                     try { connQuar = (st.data && st.data.quarantineCount) ? ((await connOp({ op: 'quarantine' })).data || []) : []; }
                     catch (e) { connQuar = false; }
                 }
-            } catch (e) { connCache = { available: true, error: e.message }; }
+            } catch (e) { connCache = { available: true, error: e.message, signIn: !!e.signIn }; }
             if (document.querySelector('#view-connector.active')) renderConnector();
         }
         /* While the service reports running, watch it; when it stops, the run

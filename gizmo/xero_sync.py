@@ -57,6 +57,14 @@ async def _connector_call(method: str, path: str, params: Optional[dict] = None,
     async with httpx.AsyncClient(timeout=25.0) as cx:
         r = await cx.request(method, _connector_url() + path, params=params, json=json_body,
                              headers=headers)
+    # The service checks no person's permissions (Reactor does, before it
+    # calls), so its 401 or 403 is a refusal of Reactor's own key. Passed on
+    # as it came, the page read it as Reactor refusing the person, cleared
+    # their sign-in and reloaded: whoever opened Xero sync while the two
+    # copies of the key were out of step, as in a key rotation, was signed out.
+    if r.status_code in (401, 403):
+        return 502, {"error": "Xero sync refused Reactor's key, so nothing was read or sent. "
+                              "The key Reactor holds for it no longer matches the one it expects."}
     try:
         body = r.json()
     except Exception:  # the error says the connector's answer was not JSON, with its status
