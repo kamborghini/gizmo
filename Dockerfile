@@ -2,7 +2,7 @@
 # that was tested. Dependabot (docker, below in .github/dependabot.yml) raises
 # the digest when the image is rebuilt with Debian security fixes; moving to a
 # new Python minor stays a deliberate change. 3.14.8 ships pip 26.2.1.
-FROM python:3.14.8-slim-trixie@sha256:89fb7d3da20043c370643435258bdd7ab755d326d359001d02988ed15ae5219e
+FROM python:3.14.10-slim-trixie@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
 
 WORKDIR /app
 
