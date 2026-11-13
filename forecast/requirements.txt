@@ -7,4 +7,4 @@ scipy==1.18.1
 scikit-learn==1.9.1
 lightgbm==4.7.0          # macOS: brew install libomp
 catboost==1.2.10          # optional: drop it and pass --no-catboost
-torch==2.14.1             # optional: drop it and pass --no-nbeats
+torch==2.15.0             # optional: drop it and pass --no-nbeats
